@@ -1,0 +1,442 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>Timestamp Pro (TimePhoto)</title>
+    <script src="https://unpkg.com/piexifjs@1.0.6/piexif.js"></script>
+    <style>
+        :root { --primary: #2563eb; --dark: #0f172a; --panel: #1e293b; --border: #334155; }
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; -webkit-tap-highlight-color: transparent; }
+        
+        body { 
+            background: var(--dark); color: white; 
+            height: 100vh; height: 100dvh; 
+            display: flex; flex-direction: column; overflow: hidden; 
+        }
+
+        header { 
+            background: var(--panel); height: 50px; flex-shrink: 0;
+            display: flex; justify-content: space-between; align-items: center; 
+            padding: 0 15px; border-bottom: 1px solid var(--border); z-index: 20; 
+        }
+        h1 { font-size: 1rem; font-weight: 700; color: #e2e8f0; }
+        .badge { font-size: 0.7rem; background: #10b981; color: #fff; padding: 2px 8px; border-radius: 10px; font-weight: 700; }
+
+        .main-container {
+            display: flex; flex: 1; overflow: hidden;
+            flex-direction: column; 
+        }
+
+        .preview-box { 
+            flex: 1; background: #000; position: relative; 
+            display: flex; align-items: center; justify-content: center; 
+            overflow: hidden; min-height: 40%; 
+        }
+
+        canvas { 
+            max-width: 100%; max-height: 100%; object-fit: contain; 
+            box-shadow: 0 0 20px rgba(0,0,0,0.5);
+        }
+
+        .controls { 
+            background: var(--panel); flex-shrink: 0; padding: 15px; 
+            display: flex; flex-direction: column; gap: 12px;
+            overflow-y: auto; border-top: 1px solid var(--border); z-index: 10;
+        }
+
+        @media (min-width: 768px) {
+            .main-container { flex-direction: row; } 
+            .controls { width: 350px; height: 100%; border-top: none; border-left: 1px solid var(--border); }
+            .preview-box { height: 100%; }
+        }
+
+        @media (max-height: 500px) and (orientation: landscape) {
+            .main-container { flex-direction: row; }
+            .controls { width: 300px; height: 100%; overflow-y: auto; }
+        }
+
+        label { font-size: 0.75rem; font-weight: 700; color: #94a3b8; text-transform: uppercase; margin-bottom: 5px; display: block; }
+        
+        .file-upload { 
+            background: #334155; border: 1px dashed #64748b; padding: 12px; 
+            text-align: center; border-radius: 8px; position: relative; cursor: pointer; 
+        }
+        .file-upload input { position: absolute; left: 0; top: 0; width: 100%; height: 100%; opacity: 0; }
+
+        .control-row { display: flex; gap: 10px; align-items: center; }
+        .control-col { flex: 1; }
+
+        textarea, input[type="datetime-local"] { 
+            width: 100%; background: #0f172a; border: 1px solid var(--border); 
+            color: white; padding: 10px; border-radius: 6px; outline: none; resize: none; font-size: 0.9rem;
+        }
+
+        input[type="range"] { width: 100%; accent-color: var(--primary); height: 25px; }
+        .slider-header { display: flex; justify-content: space-between; margin-bottom: 2px; }
+        .slider-val { font-size: 0.7rem; color: #cbd5e1; }
+
+        /* BUTTONS */
+        .btn-main { 
+            background: var(--primary); color: white; border: none; 
+            padding: 14px; border-radius: 8px; font-weight: 700; 
+            font-size: 1rem; cursor: pointer; width: 100%; margin-top: auto;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.2);
+        }
+        .btn-main:disabled { background: #475569; opacity: 0.7; cursor: not-allowed; }
+
+        /* OVERLAYS */
+        .status-overlay {
+            position: absolute; inset: 0; background: rgba(0,0,0,0.9); 
+            display: none; flex-direction: column; align-items: center; justify-content: center; 
+            z-index: 50; text-align: center; color: white;
+        }
+        .spinner { 
+            width: 40px; height: 40px; border: 4px solid #334155; 
+            border-top: 4px solid var(--primary); border-radius: 50%; 
+            animation: spin 1s linear infinite; margin-bottom: 15px; 
+        }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+
+        .hidden { display: none; }
+    </style>
+</head>
+<body>
+
+<header>
+    <h1>Timestamp Pro</h1>
+    <span class="badge">App Ready</span>
+</header>
+
+<div class="main-container">
+    <section class="preview-box">
+        <canvas id="canvas"></canvas>
+        <div id="statusOverlay" class="status-overlay">
+            <div class="spinner"></div>
+            <div id="statusText">Processing...</div>
+            <div style="font-size:0.8rem; color:#94a3b8; margin-top:5px;">Please wait...</div>
+        </div>
+        <img id="srcImg" class="hidden">
+        <video id="srcVid" class="hidden" playsinline muted crossorigin="anonymous"></video>
+    </section>
+
+    <section class="controls">
+        <div>
+            <label>1. Media File</label>
+            <div class="file-upload">
+                <span>Tap to Upload Photo/Video</span>
+                <input type="file" id="fileInput" accept="image/*,video/*">
+            </div>
+        </div>
+
+        <div class="control-row">
+            <div class="control-col" style="flex: 0 0 auto;">
+                <label>Auto</label>
+                <input type="checkbox" id="chkAuto" checked style="width: 25px; height: 25px; accent-color: var(--primary);">
+            </div>
+            <div class="control-col">
+                <label>Manual Date</label>
+                <input type="datetime-local" id="dateInput" disabled>
+            </div>
+        </div>
+
+        <div>
+            <label>3. Details</label>
+            <textarea id="txtCustom" rows="2" placeholder="Line 1: Name&#10;Line 2: Location"></textarea>
+            
+            <div style="margin-top: 12px;">
+                <div class="slider-header"><label style="margin:0;">Position Y</label><span id="posVal" class="slider-val">98%</span></div>
+                <input type="range" id="rngPos" min="0" max="100" value="98">
+            </div>
+
+            <div style="margin-top: 8px;">
+                <div class="slider-header"><label style="margin:0;">Text Size</label><span id="sizeVal" class="slider-val">30px</span></div>
+                <input type="range" id="rngSize" min="15" max="80" value="30">
+            </div>
+        </div>
+
+        <button id="btnAction" class="btn-main" disabled>Select File First</button>
+    </section>
+</div>
+
+<script>
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d', { alpha: false });
+    const srcImg = document.getElementById('srcImg');
+    const srcVid = document.getElementById('srcVid');
+    
+    const statusOverlay = document.getElementById('statusOverlay');
+    const statusText = document.getElementById('statusText');
+    const btnAction = document.getElementById('btnAction');
+    const posVal = document.getElementById('posVal');
+    const sizeVal = document.getElementById('sizeVal');
+    
+    const fileInput = document.getElementById('fileInput');
+    const chkAuto = document.getElementById('chkAuto');
+    const dateInput = document.getElementById('dateInput');
+    const txtCustom = document.getElementById('txtCustom');
+    const rngPos = document.getElementById('rngPos');
+    const rngSize = document.getElementById('rngSize');
+
+    let mode = null;
+    let loopId = null;
+    let settings = { pos: 98, size: 30, text: "" };
+
+    // --- INIT ---
+    canvas.width = 720; canvas.height = 1280;
+    ctx.fillStyle = "#111"; ctx.fillRect(0,0,720,1280);
+    
+    const saved = localStorage.getItem('ts_timephoto_v4');
+    if(saved) {
+        settings = JSON.parse(saved);
+        rngPos.value = settings.pos || 98;
+        rngSize.value = settings.size || 30;
+        txtCustom.value = settings.text || "";
+    }
+    updateLabels();
+
+    const now = new Date();
+    now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
+    dateInput.value = now.toISOString().slice(0, 16);
+
+    // --- LISTENERS ---
+    fileInput.addEventListener('change', handleFile);
+    
+    [chkAuto, dateInput, txtCustom, rngPos, rngSize].forEach(el => {
+        el.addEventListener('input', () => {
+            settings.pos = rngPos.value; settings.size = rngSize.value; settings.text = txtCustom.value;
+            localStorage.setItem('ts_timephoto_v4', JSON.stringify(settings));
+            updateLabels();
+            dateInput.disabled = chkAuto.checked;
+            if(mode === 'image' || (mode === 'video' && srcVid.paused)) drawFrame();
+        });
+    });
+
+    btnAction.addEventListener('click', () => {
+        if(mode === 'image') processImage();
+        else if(mode === 'video') processVideo();
+    });
+
+    // --- HELPER: GET SAFE FILENAME FROM DATE ---
+    function getFilenameTimestamp() {
+        const d = chkAuto.checked ? new Date() : new Date(dateInput.value);
+        const year = d.getFullYear();
+        const month = String(d.getMonth() + 1).padStart(2, '0');
+        const day = String(d.getDate()).padStart(2, '0');
+        const hour = String(d.getHours()).padStart(2, '0');
+        const min = String(d.getMinutes()).padStart(2, '0');
+        const sec = String(d.getSeconds()).padStart(2, '0');
+        return `${year}${month}${day}_${hour}${min}${sec}`;
+    }
+
+    function updateLabels() {
+        posVal.innerText = rngPos.value + "%";
+        sizeVal.innerText = rngSize.value + "px";
+    }
+
+    function handleFile(e) {
+        const file = e.target.files[0];
+        if(!file) return;
+
+        cancelAnimationFrame(loopId);
+        srcVid.pause();
+        const url = URL.createObjectURL(file);
+
+        if(file.type.startsWith('image/')) {
+            mode = 'image';
+            srcImg.src = url;
+            srcImg.onload = () => {
+                canvas.width = srcImg.naturalWidth;
+                canvas.height = srcImg.naturalHeight;
+                drawFrame();
+                btnAction.innerText = "Save / Share Image";
+                btnAction.disabled = false;
+            };
+        } else if(file.type.startsWith('video/')) {
+            mode = 'video';
+            srcVid.src = url;
+            srcVid.onloadedmetadata = () => {
+                const MAX_W = 720;
+                let w = srcVid.videoWidth;
+                let h = srcVid.videoHeight;
+                if(w > MAX_W) { h = h * (MAX_W/w); w = MAX_W; }
+                canvas.width = w; canvas.height = h;
+                
+                srcVid.currentTime = 0;
+                srcVid.onseeked = () => {
+                    drawFrame();
+                    btnAction.innerText = "Process & Share Video";
+                    btnAction.disabled = false;
+                };
+            };
+        }
+    }
+
+    function getDisplayTime() {
+        const d = chkAuto.checked ? new Date() : new Date(dateInput.value);
+        return d.toLocaleDateString('en-US', {
+            month: 'short', day: 'numeric', year: 'numeric',
+            hour: 'numeric', minute: '2-digit', hour12: true
+        });
+    }
+
+    function drawFrame() {
+        if(mode === 'image') ctx.drawImage(srcImg, 0, 0, canvas.width, canvas.height);
+        else ctx.drawImage(srcVid, 0, 0, canvas.width, canvas.height);
+
+        const text = txtCustom.value;
+        const timeStr = getDisplayTime();
+        const yPct = parseInt(rngPos.value) / 100;
+        
+        let size = parseInt(rngSize.value);
+        const scale = canvas.height / 1280; 
+        const finalSize = Math.max(16, size * scale);
+
+        ctx.font = `bold ${finalSize}px Arial`;
+        ctx.fillStyle = "white";
+        ctx.shadowColor = "black"; ctx.shadowBlur = 3; ctx.shadowOffsetY = 2;
+        ctx.textAlign = "right"; ctx.textBaseline = "bottom";
+
+        const x = canvas.width - (20 * scale);
+        let y = canvas.height * yPct;
+        const lh = finalSize * 1.25;
+
+        ctx.fillText(timeStr, x, y);
+
+        if(text) {
+            y -= lh;
+            const lines = text.split('\n').reverse();
+            lines.forEach(line => {
+                ctx.fillText(line, x, y);
+                y -= lh;
+            });
+        }
+        ctx.shadowColor = "transparent";
+    }
+
+    // --- SHARE / DOWNLOAD LOGIC ---
+    async function shareFile(blob, filename, mimeType) {
+        if (navigator.share && navigator.canShare) {
+            const file = new File([blob], filename, { type: mimeType });
+            if (navigator.canShare({ files: [file] })) {
+                try {
+                    await navigator.share({
+                        files: [file],
+                        title: 'Save Timestamped Media',
+                        text: 'Media Ready'
+                    });
+                    statusOverlay.style.display = 'none';
+                    return; 
+                } catch (err) {
+                    console.log("Share failed/cancelled, forcing download.");
+                }
+            }
+        }
+
+        // Fallback Download
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        setTimeout(() => { 
+            document.body.removeChild(a); 
+            URL.revokeObjectURL(url);
+            statusOverlay.style.display = 'none';
+        }, 1500);
+    }
+
+    // --- IMAGE PROCESSING ---
+    function processImage() {
+        statusOverlay.style.display = 'flex';
+        statusText.innerText = "Applying Timestamp...";
+        
+        setTimeout(() => {
+            const dataUrl = canvas.toDataURL("image/jpeg", 0.95);
+            let finalDataUrl = dataUrl;
+
+            const d = chkAuto.checked ? new Date() : new Date(dateInput.value);
+            
+            if(typeof piexif !== 'undefined') {
+                try {
+                    const exifStr = `${d.getFullYear()}:${(d.getMonth()+1).toString().padStart(2,'0')}:${d.getDate().toString().padStart(2,'0')} ${d.getHours().toString().padStart(2,'0')}:${d.getMinutes().toString().padStart(2,'0')}:${d.getSeconds().toString().padStart(2,'0')}`;
+                    const exifObj = { "0th": { [piexif.ImageIFD.DateTime]: exifStr }, "Exif": { [piexif.ExifIFD.DateTimeOriginal]: exifStr, [piexif.ExifIFD.DateTimeDigitized]: exifStr } };
+                    finalDataUrl = piexif.insert(piexif.dump(exifObj), dataUrl);
+                } catch(e) {}
+            }
+
+            // NEW NAME FORMAT: TimePhoto_YYYYMMDD_HHMMSS.jpg
+            const filename = `TimePhoto_${getFilenameTimestamp()}.jpg`;
+
+            fetch(finalDataUrl)
+                .then(res => res.blob())
+                .then(blob => shareFile(blob, filename, 'image/jpeg'));
+        }, 100);
+    }
+
+    // --- VIDEO PROCESSING ---
+    function processVideo() {
+        statusOverlay.style.display = 'flex';
+        statusText.innerText = "Initializing Recorder...";
+        btnAction.disabled = true;
+
+        const stream = canvas.captureStream(30);
+        let mimeType = 'video/webm'; 
+        let ext = 'webm';
+
+        if (MediaRecorder.isTypeSupported('video/mp4;codecs=h264')) {
+            mimeType = 'video/mp4;codecs=h264'; ext = 'mp4';
+        } else if (MediaRecorder.isTypeSupported('video/mp4')) {
+            mimeType = 'video/mp4'; ext = 'mp4';
+        }
+
+        let mediaRecorder;
+        let chunks = [];
+
+        try {
+            mediaRecorder = new MediaRecorder(stream, { mimeType, videoBitsPerSecond: 2500000 });
+        } catch (e) {
+            mediaRecorder = new MediaRecorder(stream);
+            ext = 'webm';
+        }
+
+        mediaRecorder.ondataavailable = e => { if(e.data.size > 0) chunks.push(e.data); };
+        
+        mediaRecorder.onstop = () => {
+            statusText.innerText = "Saving File...";
+            const blob = new Blob(chunks, { type: mimeType });
+            
+            // NEW NAME FORMAT: TimeVideo_YYYYMMDD_HHMMSS.mp4
+            const filename = `TimeVideo_${getFilenameTimestamp()}.${ext}`;
+            
+            shareFile(blob, filename, mimeType);
+            
+            btnAction.disabled = false;
+            cancelAnimationFrame(loopId);
+            srcVid.currentTime = 0;
+        };
+
+        srcVid.currentTime = 0; srcVid.muted = false;
+        mediaRecorder.start();
+        statusText.innerText = `Recording (${ext.toUpperCase()})...`;
+
+        srcVid.play().then(() => {
+            function step() {
+                if(!srcVid.paused && !srcVid.ended) {
+                    drawFrame();
+                    loopId = requestAnimationFrame(step);
+                } else {
+                    mediaRecorder.stop();
+                }
+            }
+            step();
+        }).catch(err => {
+            alert("Error: " + err);
+            statusOverlay.style.display = 'none';
+            btnAction.disabled = false;
+        });
+    }
+</script>
+</body>
+</html>
